@@ -6,25 +6,21 @@ For this section we're going to focus on simply writing something that runs (and
 
 #### Command References
 
- Run the code locally 
+Run the code locally 
 ```
-./mvnw clean spring-boot:run
-```
-
-
-. Generate an artifact (your executable)
-```
-./mvnw
+./mvnw spring-boot:run
 ```
 
 
-// TODO: 
-// Talk about running the app (giving exact commands) 
-// Refer to the concepts explicitly covered in this section
-// Discuss pitfalls of executing and deploying this on our own
+Generate an artifact (your executable that we want to deploy)
+```
+./mvnw clean package
+```
 
+Run the executable using Java
+```
+java -jar target/devops-0.0.1-SNAPSHOT.jar com.ujs.devops.DevopsApplication
+```
 
-
-Currently, we 
-
-### Relevant Concepts 
+### Why would we do this though? 
+*we should't*... There are much better ways 
