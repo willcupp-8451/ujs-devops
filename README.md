@@ -1,2 +1,4 @@
 # ujs-devops
-Sample repository targeted at exploring essential devops concepts through the use of open-source tools 
+
+## Branch 0 - Code
+For this section we're going to focus on simply writing something that runs (and then we want to run it)
