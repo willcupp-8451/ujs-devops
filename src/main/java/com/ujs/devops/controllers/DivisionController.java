@@ -10,6 +10,5 @@ public class DivisionController {
   public String getDivide(@RequestParam("numerator") int numerator,
                           @RequestParam("denominator") int denominator) {
     double result = (double) numerator / denominator;
-    throw new UnsupportedOperationException("I'm lazy and didn't feel like finishing this.");
-  }
+    return String.valueOf(result);  }
 }
