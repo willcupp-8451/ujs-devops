@@ -1,120 +1,161 @@
 # ujs-devops
 
-## Branch 2 - Deploy
-For this section we're going to actually deploy our artifact so that our users (us in this case) can access use it.
-
+## Branch 3 - Configure
+For this section we're going to add multiple environments so that we can ensure that the code that makes it to our 
+end-users is actually supposed to be there.
 
 ### Process
 
-#### Continuous Delivery (and Continuous Deployment)
+#### Fixing Broken Windows
 
-Let's actually deploy our app somewhere. We have our artifact but it's useless unless we have a runtime environment to
-host it. Heroku is an open-source alternative that we can utilize for this.
+When our applications directly impact end-users it's important to understand that any issue that a user finds might
+affect their experience and ultimately their opinion of the application in general (this is a similar to the
+[broken window concept](https://medium.com/@learnstuff.io/broken-window-theory-in-software-development-bef627a1ce99)).
 
-Let's get our app running somewhere. We'll use Heroku to get started fast. We have a couple options to get there
+Because of this, and for more reasons that we'll get into shortly, let's introduce the concept of multiple environments
+where our code is hosted.
 
-1. Use the CLI
-    - [Install the Heroku CLI](https://devcenter.heroku.com/articles/heroku-cli#download-and-install)
-    - Create the app (will require you to authenticate)
-    ```
-    heroku login
-    heroku create <your-app-name>
-    ```
-    - Deploy your app
-    ```
-    git push heroku 2-deploy:main //Deploy from branch 2
-    git push heroku main //Deploy from your main if you'd rather do that
-    ```
-   
-1. **OPTIONAL** OR Go through the browser (would suggest the CLI though for this exercise though)
-    - [Create a new-app](https://dashboard.heroku.com/new-app) with your account
-    - Integrate your Heroku account with GitHub under "Deployment method"
-        - Find your repo name and connect to it
-    - If you created your app through the UI, add the remote to it before pushing
-    ```
-    heroku git:remote --app <your-app-name>
-    ```
-    - Preform a manual deploy of the 2-deploy branch
+##### **Let's update Heroku so that we have multiple environments**
 
-1. Navigate to our hello-world endpoint `https://<your-app-name>.herokuapp.com/hello-world`  and verify that it works
+1. Start by creating a [heroku pipeline](https://devcenter.heroku.com/articles/pipelines). This will allow us to
+maintain multiple environments for our app.
+
+    - This can be done via the CLI with the following command which will take the app that we were using and mark it
+    as the app in the staging environment (environment checked before production)
+        ```
+        heroku pipelines:create <pipeline-name> -a <app-name> -s staging
+        ```
+    - You can also do this manually through the UI if you follow
+    [these instructions](https://devcenter.heroku.com/articles/pipelines#creating-pipelines-from-the-heroku-dashboard)
+
+1. Then rename the Heroku application so that it's reflective of the environment that it's getting deployed to
+**this will make things less confusing later**
+    ```
+    heroku apps:rename <app-name>-stg --app <app-name>
+    ```
+1. While we're here let's also add a production instance, while this will be the same codebase as our staging app
+for now, we will update this when we start updating the Actions workflow in the next step.
+    ```
+    heroku apps:create <app-name>-prd
+    heroku pipelines:add <pipeline-name> -a <app-name>-prd -s production
+    ```
+1. Verify that your pipeline has all the right apps
+    ```
+    heroku pipelines:info <pipeline-name>
+    ```
+    
+##### Now that we have our heroku pipeline lets update our workflows to account for this.
+1. Let's change our build-maven.yml file to point to our staging environment.
+    - You can have this as a separate pipeline or just by renaming the current workflow and slightly changing our
+    "Heroku deploy jar" step so that it points to the current environment
+    ```
+    - name: Heroku deploy jar
+      env:
+        HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+      run: heroku deploy:jar <jar-name>.jar --jdk 11 --app <stg-app-name>
+    ```
+1. After the workflow run has completed, try to navigate to a *new secret* endpoint that was included with this branch
+    ```
+    curl https://<stg-app-name>.herokuapp.com/message
+    OR just navigate to the URL in your browser
+    ```
+1. Then configure a new workflow to promote our application to our production app! This should be simplified
+version of our staging workflow that focuses no installing heroku and using the built-in promote command.
+    ```
+    name: Promote app to production
+
+    on: workflow_dispatch
+
+    jobs:
+      promote:
+
+        runs-on: ubuntu-latest
+
+        steps:
+        - name: Install Heroku
+          run: |
+            curl https://cli-assets.heroku.com/install-ubuntu.sh | sh
+
+        - name: Heroku promote app
+          env:
+            HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+          run: heroku pipelines:promote -a <stg-app-name>
+    ```
+    - One thing to note here, is the [workflow_dispatch event](https://docs.github.com/en/actions/reference/events-that-trigger-workflows#workflow_dispatch)
+    that the workflow is dependent on. This event basically ensures that the only way that this workflow is run is by
+    manually triggering the workflow from the actions tab in your repo in GitHub. As easy as that it is, ideally this is
+    where we would want to include any quality gates (like scanning for vulnerabilities) to make sure that the promotion
+    is secure and intentional.
+1. Now that we have the workflow set up, let's actually trigger it and see if we have our production app. Once it's
+complete let's run the same cURL request as earlier
+    ```
+    curl https://<stg-app-name>.herokuapp.com/message
+    ```
+1. Well looking at the output, it seems to work as expected, however, it seems like we have a message meant for staging
+in our production environment... How do we fix this?
 
 ---
 
-#### Build Once, Deploy Many
+#### Configuration Separated from Deployable Code
 
-Now let's integrate this Heroku deployment as part of our GHA workflow.
+One essential concept when discussing multiple runtime environments to host our code is the idea of keeping configuration
+separated from the codebase itself. For example, if we look at the MessageController that we were using previously we can
+see that the value being returned is hardcoded. This means that if we want to change this for production, **we'd have
+to change the codebase every time we want to update it**...
 
-Assuming we're using an artifact repository we want the build (CI) to happen as part of our workflow (from the last
-branch). So after we build our artifact, lets try to deploy that.
+That is unless we create an abstraction between the codebase and the given environment using dynamically interpolated
+environment variables that can be configured per environment. This functionality is commonly handled by services that
+connect to our deployment tools, for this stack Heroku has [config variables](https://devcenter.heroku.com/articles/config-vars).
 
-Let's set up a new job for our deploys. In an ideal CI/CD workflow we'd have an artifact repository exist between our
-deployments for [a variety of reasons](https://jfrog.com/knowledge-base/what-is-an-artifact-repository/). However, for
-this quick POC we'll just use GitHub's ability to store our artifact
-
-1. First, lets create a new Deploy Job that is dependent on the build job that we completed as part of the
-previous branch. 
-    - This is required since we need the artifact from the previous job (similar to what we'd do with an
-    artifact repository).
+1. Let's create the config variables per environment
+    - Use the Heroku CLI to create a configuration variable for both the staging and production app environments
     ```
-      deploy:
-
-        runs-on: ubuntu-latest
-        needs: build
+    heroku config:set ENV_MESSAGE="this is staging" -a <stg-app-name>
+    heroku config:set ENV_MESSAGE="this is production" -a <prd-app-name>
     ```
-1. Let's pull down our JAR that we published as part of the build job. 
-    - This just involves to using the download-artifact (using the name of the artifact that we want to retrieve)
-    action.
+1. Update our app properties so that it references the environment variable
+    - Go to your application.properties file in your codebase and add the following:
     ```
-      - name: Retrieve Artifact
-        uses: actions/download-artifact@v2
-        with:
-          name: JARtifact
+    e451.my-message=${ENV_MESSAGE:"this is a default message"}
     ```
-
-1. Now set up Heroku configuration as part of the workflow
-    - Let's start by installing the CLI and the corresponding Java plugin
-    [as described here](https://devcenter.heroku.com/articles/deploying-executable-jar-files). This will require adding
-    some more steps to our `deploy` job.
+    - This will ensure that we can use this property within our codebase, as we'll see in the next step. This also
+    grants us the ability to have multiple properties files that we can refer to ranging from local instances to deployed
+    ones (which you can read about more [here](https://docs.spring.io/spring-boot/docs/current/reference/html/features.html#features.profiles)
+    if interested)
+1. Change the the message controller to reference our new application.properties value using the @Value annotation
     ```
-    - name: Install Heroku and java plugin
-      run: |
-        curl https://cli-assets.heroku.com/install-ubuntu.sh | sh
-        heroku plugins:install java
+      @GetMapping("/message")
+      public String getMessage(@Value("${e451.my-message}") String myMessage) {
+        return myMessage;
+      }
     ```
-    - Before we can use the heroku CLI as part of our workflow we need a way to authenticate. To do this, lets generate
-    the API key using the local CLI [using their documentation](https://devcenter.heroku.com/articles/authentication#retrieving-the-api-token).
-    Pull the token value from running the following command
+1. Commit and push your changes, this should kick off the build/deploy to staging, and then promote it to production if
+all is well. Then use the previous cURL statements to verify things look up to snuff.
     ```
-    heroku authorizations:create
-    ```
-    - Create [a GitHub Secret](https://docs.github.com/en/actions/reference/encrypted-secrets#creating-encrypted-secrets-for-a-repository)
-    for your workflow and include it in your workflow step to deploy your JAR
-    ```
-    - name: Heroku deploy jar
-      env:
-        HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+    curl https://<stg-app-name>.herokuapp.com/message
+    curl https://<prd-app-name>.herokuapp.com/message
     ```
 
-1. Let's deploy the jar with a GitHub action using this syntax from [the jar deploy](https://devcenter.heroku.com/articles/deploying-executable-jar-files#using-the-heroku-java-cli-plugin)
-    ```
-    - name: Heroku deploy jar
-      env:
-        HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-      run: heroku deploy:jar <jar-name>.jar --jdk 11 --app <app-name>
-    ```
-   
+While this works for this very obvious example, some other use-cases might include database connection strings or service
+account credentials that are specific to certain environments. By managing things at the deployment level, we're able to
+deploy to environments without having to worry about making code changes for values that will differ by the environment
+regardless.
+
+
+Now that we've configured our code for multiple environments, lets see how we plan to monitor/maintain our app when things
+aren't going as we intended.
+
+
 ### Gotchas
-- Heroku only deploys code that you push to main/master. Pushing code to another branch of the heroku remote has no affect.
-    - This shouldn't affect our case though, since we're simply using the JAR 
-- Make sure you have a system.properties file present in your repo so that heroku is able to compile Java 11
-[source](https://devcenter.heroku.com/changelog-items/1489)
-- [Server port was required to deploy the jar](https://stackoverflow.com/questions/36751071/heroku-web-process-failed-to-bind-to-port-within-90-seconds-of-launch-tootall)
 
+- {Insert Here}
 
 ### References
 
-- [Atlassian - Continuous Deployment vs. Continuous Delivery](https://www.atlassian.com/continuous-delivery/principles/continuous-integration-vs-delivery-vs-deployment)
-- [Some comment on a Reddit thread - Build Once Deploy Many](https://www.reddit.com/r/devops/comments/d9ln04/build_once_deploy_many/f1iu60i?utm_source=share&utm_medium=web2x&context=3)
-- [Deploying executable jars in Heroku](https://devcenter.heroku.com/articles/deploying-executable-jar-files)
-- [Deploy to Heroku from GHA](https://dev.to/heroku/deploying-to-heroku-from-github-actions-29ej)
-- [GitLab Example](https://lab.github.com/githubtraining/github-actions:-continuous-integration?overlay=register-box-overlay)
+- [Wikipedia - Broken Windows Theory](https://en.wikipedia.org/wiki/Broken_windows_theory)
+- [12FA - Config](https://12factor.net/config)
+- [GHA - Workflow Dispatch Event](https://docs.github.com/en/actions/reference/events-that-trigger-workflows#workflow_dispatch)
+- [Config Vars in Heroku](https://devcenter.heroku.com/articles/config-vars)
+- [Spring Boot Environments in Heroku](https://devcenter.heroku.com/articles/deploying-spring-boot-apps-to-heroku)
+- [Spring Boot Profiles](https://docs.spring.io/spring-boot/docs/current/reference/html/features.html#features.profiles)
+
