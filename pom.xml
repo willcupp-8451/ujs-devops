@@ -15,6 +15,9 @@
 	<description>Project used to demonstrate fundamental DevOps &amp; CI/CD centered concepts </description>
 	<properties>
 		<java.version>11</java.version>
+		<sonar.projectKey>caseyokane-8451_devops-test</sonar.projectKey>
+		<sonar.organization>caseyokane-8451</sonar.organization>
+		<sonar.host.url>https://sonarcloud.io</sonar.host.url>
 	</properties>
 	<dependencies>
 		<dependency>

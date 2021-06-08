@@ -1,154 +1,120 @@
 # ujs-devops
 
-## Branch 1 - Build
-For this section we're going to build our code in a more consistent manner while being a bit more proactive about testing
-the things we build.
+## Branch 2 - Deploy
+For this section we're going to actually deploy our artifact so that our users (us in this case) can access use it.
 
-TODO:
-- Introduce templatization (templatize our workflow with some parameters so that anyone could use it)
-    - Either use a workflow template or a custom action
 
 ### Process
 
-#### Repeatable Build Process
+#### Continuous Delivery (and Continuous Deployment)
 
-Let's automate that build process using a CI tool [GitHub Actions](https://docs.github.com/en/actions).
+Let's actually deploy our app somewhere. We have our artifact but it's useless unless we have a runtime environment to
+host it. Heroku is an open-source alternative that we can utilize for this.
 
-1. Go to the actions tab within GitHub
-1. Select the Java with Maven starter workflow (or set one up yourself)
-    - Take note of the editor (we won't go into much detail here but you can bring in new actions and refer to GitHub's
-    documentation)
-1. Make some slight changes to make sure it's going to publish something
-    - For the build workflow. Need to add:
+Let's get our app running somewhere. We'll use Heroku to get started fast. We have a couple options to get there
+
+1. Use the CLI
+    - [Install the Heroku CLI](https://devcenter.heroku.com/articles/heroku-cli#download-and-install)
+    - Create the app (will require you to authenticate)
     ```
-    - name: Build with Maven
+    heroku login
+    heroku create <your-app-name>
+    ```
+    - Deploy your app
+    ```
+    git push heroku 2-deploy:main //Deploy from branch 2
+    git push heroku main //Deploy from your main if you'd rather do that
+    ```
+   
+1. **OPTIONAL** OR Go through the browser (would suggest the CLI though for this exercise though)
+    - [Create a new-app](https://dashboard.heroku.com/new-app) with your account
+    - Integrate your Heroku account with GitHub under "Deployment method"
+        - Find your repo name and connect to it
+    - If you created your app through the UI, add the remote to it before pushing
+    ```
+    heroku git:remote --app <your-app-name>
+    ```
+    - Preform a manual deploy of the 2-deploy branch
+
+1. Navigate to our hello-world endpoint `https://<your-app-name>.herokuapp.com/hello-world`  and verify that it works
+
+---
+
+#### Build Once, Deploy Many
+
+Now let's integrate this Heroku deployment as part of our GHA workflow.
+
+Assuming we're using an artifact repository we want the build (CI) to happen as part of our workflow (from the last
+branch). So after we build our artifact, lets try to deploy that.
+
+Let's set up a new job for our deploys. In an ideal CI/CD workflow we'd have an artifact repository exist between our
+deployments for [a variety of reasons](https://jfrog.com/knowledge-base/what-is-an-artifact-repository/). However, for
+this quick POC we'll just use GitHub's ability to store our artifact
+
+1. First, lets create a new Deploy Job that is dependent on the build job that we completed as part of the
+previous branch. 
+    - This is required since we need the artifact from the previous job (similar to what we'd do with an
+    artifact repository).
+    ```
+      deploy:
+
+        runs-on: ubuntu-latest
+        needs: build
+    ```
+1. Let's pull down our JAR that we published as part of the build job. 
+    - This just involves to using the download-artifact (using the name of the artifact that we want to retrieve)
+    action.
+    ```
+      - name: Retrieve Artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: JARtifact
+    ```
+
+1. Now set up Heroku configuration as part of the workflow
+    - Let's start by installing the CLI and the corresponding Java plugin
+    [as described here](https://devcenter.heroku.com/articles/deploying-executable-jar-files). This will require adding
+    some more steps to our `deploy` job.
+    ```
+    - name: Install Heroku and java plugin
       run: |
-        ./mvnw -B package --file pom.xml
-        mkdir artifacts && cp target/*.jar artifacts
-
-    - name: Persist Artifacts
-      uses: actions/upload-artifact@v2
-      with:
-        name: github-actions-artifact
-        path: artifacts
-
+        curl https://cli-assets.heroku.com/install-ubuntu.sh | sh
+        heroku plugins:install java
     ```
-    - For the build/publish workflow. Need to change the creds in the settings.xml and add to your workflow:
-    settings.xml
-
+    - Before we can use the heroku CLI as part of our workflow we need a way to authenticate. To do this, lets generate
+    the API key using the local CLI [using their documentation](https://devcenter.heroku.com/articles/authentication#retrieving-the-api-token).
+    Pull the token value from running the following command
     ```
-	<activeProfiles>
-		<activeProfile>github</activeProfile>
-	</activeProfiles>
-
-	<profiles>
-		<profile>
-			<id>github</id>
-			<repositories>
-				<repository>
-					<id>github</id>
-					<name>GitHub caseyokane-8451 Apache Maven Packages</name>
-					<url>https://maven.pkg.github.com/caseyokane-8451/ujs-devops</url>
-				</repository>
-			</repositories>
-		</profile>
-	</profiles>
-
-	<servers>
-		<server>
-			<id>github</id>
-			<username>caseyokane-8451</username>
-			<password>${env.GITHUB_TOKEN}</password>
-		</server>
-	</servers>
+    heroku authorizations:create
     ```
-    - Also change your workflow settings to correspond to it
+    - Create [a GitHub Secret](https://docs.github.com/en/actions/reference/encrypted-secrets#creating-encrypted-secrets-for-a-repository)
+    for your workflow and include it in your workflow step to deploy your JAR
     ```
-    - name: Publish to GitHub Packages
-      run: mvn deploy -s settings.xml
+    - name: Heroku deploy jar
       env:
-        GITHUB_TOKEN: ${{ github.token }}
-
-    ```
-1. Commit your workflow
-1. Run the workflow
-1. Uh oh
-
----
-
-#### Test Driven Development
-
-Tests are important, so I wrote some (how else will we know if our thing works) but they break the code? This is something
-that happens from time to time. This is why it's encouraged to do something known as
-[Test Driven Development](https://en.wikipedia.org/wiki/Test-driven_development). For now though:
-
-1. Let's find the issue and fix it.
-1. Commit and run the pipeline again
-1. Going back to our original goal, look at your packaged artifact
-    - Why is this valuable? Because it gives you the ability to store previous builds and rollback whenever necessary
-    while also giving you better ability to test certain revisions if necessary
-
----
-
-#### Static Code Analysis
-
-Now how do we know our code is good? We know it builds, but is it right? Probably good to check (and have those checks
-exist as part of the pipeline)
-
-. Import your project into [Sonar Cloud](https://sonarcloud.io/github?gads_campaign=North-America-SonarCloud&gads_ad_group=SC-GitHub&gads_keyword=sonarcloud%20github&gclid=CjwKCAjwqIiFBhAHEiwANg9szvr0JVWzwaxeu1lbtrLEDAFvvZLF8WabyTrzSvdddV4Whq81Hvaz6BoCcj8QAvD_BwE)
-(give it access to look at your repositories)
-1. Create the org within Sonar Cloud
-1. Configure it to run with GHA
-    - Create a GitHub Secret for your SONAR_TOKEN
-    - Update your pom.xml with the following
-    ```
-    <properties>
-      <sonar.projectKey>caseyokane-8451_ujs-devops</sonar.projectKey>
-      <sonar.organization>caseyokane-8451</sonar.organization>
-      <sonar.host.url>https://sonarcloud.io</sonar.host.url>
-    </properties>
+        HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
     ```
 
-    - Update your workflow with the following
+1. Let's deploy the jar with a GitHub action using this syntax from [the jar deploy](https://devcenter.heroku.com/articles/deploying-executable-jar-files#using-the-heroku-java-cli-plugin)
     ```
-      - name: Cache SonarCloud packages
-        uses: actions/cache@v1
-        with:
-          path: ~/.sonar/cache
-          key: ${{ runner.os }}-sonar
-          restore-keys: ${{ runner.os }}-sonar
-      - name: Cache Maven packages
-        uses: actions/cache@v1
-        with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2
-      - name: Build and analyze
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Needed to get PR information, if any
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar
-     ```
-
-1. Commit your changes and run the workflow again
-1. Now we'll know when things are starting to get out of hand
-
----
-
-#### BONUS: Templatization and Usability
-
-TODO
-
+    - name: Heroku deploy jar
+      env:
+        HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+      run: heroku deploy:jar <jar-name>.jar --jdk 11 --app <app-name>
+    ```
+   
 ### Gotchas
-- Be sure that you're pointing to your own GitHub user/repo (especially if you name it something different)
-- Make sure that your workflow triggers are specific to the 1-build branch. Otherwise you likely won't see them kickoff
-when you expect. Example trigger shown below:
-```
-on:
-  push:
-    branch: [ 1-build ]
-```
+- Heroku only deploys code that you push to main/master. Pushing code to another branch of the heroku remote has no affect.
+    - This shouldn't affect our case though, since we're simply using the JAR 
+- Make sure you have a system.properties file present in your repo so that heroku is able to compile Java 11
+[source](https://devcenter.heroku.com/changelog-items/1489)
+- [Server port was required to deploy the jar](https://stackoverflow.com/questions/36751071/heroku-web-process-failed-to-bind-to-port-within-90-seconds-of-launch-tootall)
+
 
 ### References
-[GHA Docs - Publish Maven Package to GitHub Packages](https://docs.github.com/en/actions/guides/publishing-java-packages-with-maven)
-[GHA Community - Unauthorized error](https://github.community/t/deploying-to-github-packages-from-github-actions-returns-unauthorized-error/18156)
+
+- [Atlassian - Continuous Deployment vs. Continuous Delivery](https://www.atlassian.com/continuous-delivery/principles/continuous-integration-vs-delivery-vs-deployment)
+- [Some comment on a Reddit thread - Build Once Deploy Many](https://www.reddit.com/r/devops/comments/d9ln04/build_once_deploy_many/f1iu60i?utm_source=share&utm_medium=web2x&context=3)
+- [Deploying executable jars in Heroku](https://devcenter.heroku.com/articles/deploying-executable-jar-files)
+- [Deploy to Heroku from GHA](https://dev.to/heroku/deploying-to-heroku-from-github-actions-29ej)
+- [GitLab Example](https://lab.github.com/githubtraining/github-actions:-continuous-integration?overlay=register-box-overlay)
