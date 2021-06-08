@@ -1,161 +1,160 @@
 # ujs-devops
 
-## Branch 3 - Configure
-For this section we're going to add multiple environments so that we can ensure that the code that makes it to our 
-end-users is actually supposed to be there.
+## Branch 4 - monitor & maintain
+For this section we're going to figure out what to do when things aren't operating as we may have intended and how we can
+find out that we have a problem in the first place.
+
+So we have a local, staging, and production environment where our code can run but how do we make sure that everything is
+operating correctly and efficiently? The answer is multiple concepts: historical log aggregation, service level monitoring and
+alerting.
+
+For our purposes we'll focus on historical logs and alerting, but expect to learn more about all of these concepts in
+another jumpstart session from the SRE team down the road.
 
 ### Process
 
-#### Fixing Broken Windows
+#### Historical Logs
 
-When our applications directly impact end-users it's important to understand that any issue that a user finds might
-affect their experience and ultimately their opinion of the application in general (this is a similar to the
-[broken window concept](https://medium.com/@learnstuff.io/broken-window-theory-in-software-development-bef627a1ce99)).
+A key component to triage and error determination is having a way to aggregate your application's logs in a readable
+and queryable manner. This allows you to trace where an issue occurred and find relevant logs to point you in the
+direction of finding a fix.
 
-Because of this, and for more reasons that we'll get into shortly, let's introduce the concept of multiple environments
-where our code is hosted.
+To represent this, let's look at some of Heroku's functionality (and potentially some other tools as well)
 
-##### **Let's update Heroku so that we have multiple environments**
+1. First let's see what Heroku logging looks like for our staging application
+   - We can retrieve Heroku logs from the [CLI](https://devcenter.heroku.com/articles/logging#log-retrieval-via-cli-view-logs)
+   or the [browser](https://devcenter.heroku.com/articles/logging#build-logs). For our purposes, let's just try to tail
+   the logs via the CLI
+   ```
+   heroku logs -a <app-name> --tail
+   ```
+   - Then hit the message endpoint again so we can verify that the logs are tailed
+   ```
+   curl https://<stg-app-name>.herokuapp.com/message
+   ```
+1. Now, since we're on this new branch, lets say that I made a change and added a new endpoint that a user asked for
+without telling you and they complained to you about it not working properly. Let's check it out and see what's up:
+    - Navigate to the endpoint via the browser or a cURL request:
+    ```
+    https://<stg-app-name>.herokuapp.com/divide?numerator=4&denominator=2
+    curl https://<stg-app-name>.herokuapp.com/divide\?numerator\=4\&denominator\=2
+    ```
+    - Uh, oh what's wrong? Let's take a look at the logs to see.
+    - Seems like when I implemented the feature, I didn't really do anything... Looks like you're going to have to fix my
+    mistake 😬
+ 
+ ---
 
-1. Start by creating a [heroku pipeline](https://devcenter.heroku.com/articles/pipelines). This will allow us to
-maintain multiple environments for our app.
+#### Maintain (Test Driven Development/Code Reviews)
 
-    - This can be done via the CLI with the following command which will take the app that we were using and mark it
-    as the app in the staging environment (environment checked before production)
-        ```
-        heroku pipelines:create <pipeline-name> -a <app-name> -s staging
-        ```
-    - You can also do this manually through the UI if you follow
-    [these instructions](https://devcenter.heroku.com/articles/pipelines#creating-pipelines-from-the-heroku-dashboard)
+Our code is broken so we should probably bug the person who broke things (but really let's just fix it). A key
+component to maintaining a codebase is testing while we develop, so we don't encounter issues like this in the wild. So
+lets do the right thing and add a test for the thing we're trying to fix before we fix it.
 
-1. Then rename the Heroku application so that it's reflective of the environment that it's getting deployed to
-**this will make things less confusing later**
-    ```
-    heroku apps:rename <app-name>-stg --app <app-name>
-    ```
-1. While we're here let's also add a production instance, while this will be the same codebase as our staging app
-for now, we will update this when we start updating the Actions workflow in the next step.
-    ```
-    heroku apps:create <app-name>-prd
-    heroku pipelines:add <pipeline-name> -a <app-name>-prd -s production
-    ```
-1. Verify that your pipeline has all the right apps
-    ```
-    heroku pipelines:info <pipeline-name>
-    ```
-    
-##### Now that we have our heroku pipeline lets update our workflows to account for this.
-1. Let's change our build-maven.yml file to point to our staging environment.
-    - You can have this as a separate pipeline or just by renaming the current workflow and slightly changing our
-    "Heroku deploy jar" step so that it points to the current environment
-    ```
-    - name: Heroku deploy jar
-      env:
-        HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-      run: heroku deploy:jar <jar-name>.jar --jdk 11 --app <stg-app-name>
-    ```
-1. After the workflow run has completed, try to navigate to a *new secret* endpoint that was included with this branch
-    ```
-    curl https://<stg-app-name>.herokuapp.com/message
-    OR just navigate to the URL in your browser
-    ```
-1. Then configure a new workflow to promote our application to our production app! This should be simplified
-version of our staging workflow that focuses no installing heroku and using the built-in promote command.
-    ```
-    name: Promote app to production
 
-    on: workflow_dispatch
-
-    jobs:
-      promote:
-
-        runs-on: ubuntu-latest
-
-        steps:
-        - name: Install Heroku
-          run: |
-            curl https://cli-assets.heroku.com/install-ubuntu.sh | sh
-
-        - name: Heroku promote app
-          env:
-            HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-          run: heroku pipelines:promote -a <stg-app-name>
+1. Add a new test file for the divide controller and add the following
     ```
-    - One thing to note here, is the [workflow_dispatch event](https://docs.github.com/en/actions/reference/events-that-trigger-workflows#workflow_dispatch)
-    that the workflow is dependent on. This event basically ensures that the only way that this workflow is run is by
-    manually triggering the workflow from the actions tab in your repo in GitHub. As easy as that it is, ideally this is
-    where we would want to include any quality gates (like scanning for vulnerabilities) to make sure that the promotion
-    is secure and intentional.
-1. Now that we have the workflow set up, let's actually trigger it and see if we have our production app. Once it's
-complete let's run the same cURL request as earlier
+      @Test
+      public void getDivisionResult() throws Exception {
+        final String uri = "/divide?numerator=4&denominator=2";
+
+        mvc.perform(MockMvcRequestBuilders.get(uri).accept(MediaType.APPLICATION_JSON))
+            .andExpect(status().isOk())
+            .andExpect(content().string(equalTo("2.0")));
+      }
     ```
-    curl https://<stg-app-name>.herokuapp.com/message
+
+1. This gives us coverage over at least the issue that we were seeing earlier (for this demo we'll just focus on this
+case but we'll probably want some boundary cases later). Anyway let's fix the thing, should be pretty easy (hopefully).
     ```
-1. Well looking at the output, it seems to work as expected, however, it seems like we have a message meant for staging
-in our production environment... How do we fix this?
+      @GetMapping("/divide")
+      public String getDivide(@RequestParam("numerator") int numerator,
+                              @RequestParam("denominator") int denominator) {
+        double result = (double) numerator / denominator;
+        return String.valueOf(result);
+      }
+    ```
+
+1. Now lets push this to our staging environment (by committing and pushing to GitHub) and test it using the same curl
+request as earlier
+    ```
+    curl https://<stg-app-name>.herokuapp.com/divide\?numerator\=4\&denominator\=2
+    ```
+
+1. After we confirmed that it worked for staging, let's open a Pull Request so that members of our team can review the
+changes and confirm things before we promote to production. Thus completing the cycle all the way from our initial
+development to the continued maintenance.
 
 ---
 
-#### Configuration Separated from Deployable Code
+#### <ins>**BONUS**</ins> Alerting
 
-One essential concept when discussing multiple runtime environments to host our code is the idea of keeping configuration
-separated from the codebase itself. For example, if we look at the MessageController that we were using previously we can
-see that the value being returned is hardcoded. This means that if we want to change this for production, **we'd have
-to change the codebase every time we want to update it**...
+Another component of monitoring/maintaining is making sure that we're alerted to these issues before a user experiences
+them. So it's important that we're proactive about fixing these issues after we initially find them.
 
-That is unless we create an abstraction between the codebase and the given environment using dynamically interpolated
-environment variables that can be configured per environment. This functionality is commonly handled by services that
-connect to our deployment tools, for this stack Heroku has [config variables](https://devcenter.heroku.com/articles/config-vars).
+While [GitHub](https://github.com/settings/notifications) and
+[Heroku](https://devcenter.heroku.com/articles/metrics#threshold-alerting) have some alerting functionality,
+we can use something else to give us the granular control that we really need. That's where [Sentry](https://docs.sentry.io/)
+(another OSS solution) comes in.
 
-1. Let's create the config variables per environment
-    - Use the Heroku CLI to create a configuration variable for both the staging and production app environments
+
+For our project, we can configure sentry for our project by creating an organization and creating a project for our
+repository.
+
+1. First, lets add some things to our codebase so that sentry can can connect to our app
+    - Add a few dependencies to your pom.xml
     ```
-    heroku config:set ENV_MESSAGE="this is staging" -a <stg-app-name>
-    heroku config:set ENV_MESSAGE="this is production" -a <prd-app-name>
+    <dependency>
+        <groupId>io.sentry</groupId>
+        <artifactId>sentry-spring-boot-starter</artifactId>
+        <version>5.0.0</version>
+    </dependency>
+    <dependency>
+        <groupId>io.sentry</groupId>
+        <artifactId>sentry-logback</artifactId>
+        <version>5.0.0</version>
+    </dependency>
     ```
-1. Update our app properties so that it references the environment variable
-    - Go to your application.properties file in your codebase and add the following:
+    - Then add a line to the application.properties
     ```
-    e451.my-message=${ENV_MESSAGE:"this is a default message"}
+    sentry.dsn=https://d8998ab4ced849878242f4ab9b316388@o789068.ingest.sentry.io/5799950
     ```
-    - This will ensure that we can use this property within our codebase, as we'll see in the next step. This also
-    grants us the ability to have multiple properties files that we can refer to ranging from local instances to deployed
-    ones (which you can read about more [here](https://docs.spring.io/spring-boot/docs/current/reference/html/features.html#features.profiles)
-    if interested)
-1. Change the the message controller to reference our new application.properties value using the @Value annotation
+
+1. Since we already fixed our issue, lets add another endpoint so we can verify things work
+    - Add an exception endpoint that we can call to test things
     ```
-      @GetMapping("/message")
-      public String getMessage(@Value("${e451.my-message}") String myMessage) {
-        return myMessage;
+      @GetMapping("/error-endpoint")
+      public void blowThingsUp() {
+        try {
+          throw new Exception("This is a test.");
+        } catch (Exception e) {
+          Sentry.captureException(e);
+        }
       }
     ```
-1. Commit and push your changes, this should kick off the build/deploy to staging, and then promote it to production if
-all is well. Then use the previous cURL statements to verify things look up to snuff.
+    - Commit and push all the changes to the staging environment
+
+1. Lets head to Sentry and see our issue
+    - Go to your specific organization that you configuration is set up for
     ```
-    curl https://<stg-app-name>.herokuapp.com/message
-    curl https://<prd-app-name>.herokuapp.com/message
+    https://sentry.io/organizations/<sentry-org-name>
+    ```
+    - If you aren't seeing anything, try to hit your endpoint so that Sentry detects your issue
+    ```
+    curl https://<stg-app-name>.herokuapp.com/error-endpoint
     ```
 
-While this works for this very obvious example, some other use-cases might include database connection strings or service
-account credentials that are specific to certain environments. By managing things at the deployment level, we're able to
-deploy to environments without having to worry about making code changes for values that will differ by the environment
-regardless.
+1. From there we can look at the issue and use Sentry's functionality to detect how the issue occurred and even resolve it
+    - While we aren't going to a crazy amount of detail about Sentry and it's functionality; it's important to know that
+    tools like it exist and can help improve your ability to detect issues and set up relevant alerts to make monitoring
+    and maintaining even easier
+    - You can read more about [issues here](https://docs.sentry.io/product/issues/) and
+    [alerting here](https://docs.sentry.io/product/alerts-notifications/)
 
-
-Now that we've configured our code for multiple environments, lets see how we plan to monitor/maintain our app when things
-aren't going as we intended.
-
-
-### Gotchas
-
-- {Insert Here}
 
 ### References
 
-- [Wikipedia - Broken Windows Theory](https://en.wikipedia.org/wiki/Broken_windows_theory)
-- [12FA - Config](https://12factor.net/config)
-- [GHA - Workflow Dispatch Event](https://docs.github.com/en/actions/reference/events-that-trigger-workflows#workflow_dispatch)
-- [Config Vars in Heroku](https://devcenter.heroku.com/articles/config-vars)
-- [Spring Boot Environments in Heroku](https://devcenter.heroku.com/articles/deploying-spring-boot-apps-to-heroku)
-- [Spring Boot Profiles](https://docs.spring.io/spring-boot/docs/current/reference/html/features.html#features.profiles)
+- [O'Reilly - SRE Overview](https://www.oreilly.com/content/site-reliability-engineering-sre-a-simple-overview/)
+- [Martin Fowler - TDD](https://martinfowler.com/bliki/TestDrivenDevelopment.html)
+- [Sentry Spring Boot Documentation](https://docs.sentry.io/platforms/java/guides/spring-boot/)
 
