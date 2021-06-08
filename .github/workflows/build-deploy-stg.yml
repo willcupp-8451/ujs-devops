@@ -6,7 +6,7 @@ name: Java CI with Maven
 
 on:
   push:
-    branches: [ 3-configure ]
+    branches: [ 4-monitor-maintain ]
 
 jobs:
   build:

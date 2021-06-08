@@ -1,5 +1,6 @@
 package com.ujs.devops.controllers;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -7,7 +8,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class MessageController {
 
   @GetMapping("/message")
-  public String getVariableString() {
-    return "this is staging";
+  public String getMessage(@Value("${e451.my-message}") String myMessage) {
+    return myMessage;
   }
 }

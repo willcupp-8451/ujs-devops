@@ -1,0 +1,20 @@
+# This workflow will promote our application to our production app in Heroku whenever explicitly run 
+
+name: Promote app to production 
+
+on: workflow_dispatch
+
+jobs:
+  promote:
+
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Install Heroku
+      run: |
+        curl https://cli-assets.heroku.com/install-ubuntu.sh | sh
+        
+    - name: Heroku promote app
+      env: 
+        HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+      run: heroku pipelines:promote -a devops-test-stg
