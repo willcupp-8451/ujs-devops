@@ -12,10 +12,9 @@ Let's automate our previous build process using a CI tool [GitHub Actions](https
 make things more repeatable, consistent, and reduce the amount of manual intervention that is required.
 
 1. Go to the actions tab within GitHub and make your own
-        - Select the Java with Maven starter workflow (or set one up yourself)
-        - Change the name to `.github/workflows/ci-java.yml` so that it correlates with the rest of the branches
-        - Take note of the editor (we won't go into much detail here but, you can bring in new actions and refer to GitHub's
-        [documentation](https://github.blog/2019-10-01-new-workflow-editor-for-github-actions/))
+      - Select the Java with Maven starter workflow (or set one up yourself)
+      - Change the name to `.github/workflows/ci-java.yml` so that it correlates with the rest of the branches
+      - Take note of the editor (we won't go into much detail here but, you can bring in new actions and refer to GitHub's [documentation](https://github.blog/2019-10-01-new-workflow-editor-for-github-actions/))
 1. Make some slight changes to make sure it's going to publish something
     - For the build workflow, make sure the trigger events so that it triggers based on pushes to `1-build` 
     branch.
